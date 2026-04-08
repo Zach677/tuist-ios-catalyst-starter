@@ -1,0 +1,30 @@
+[tools]
+tuist = "4.162.1"
+
+[tasks.run-macos]
+description = "Install deps if needed, ensure Tuist caches are configured, build, and relaunch the Mac Catalyst debug app"
+run = "bash scripts/run-macos.sh"
+
+[tasks.run-ios-sim]
+description = "Install deps if needed, ensure Tuist caches are configured, and run the iOS app in Simulator via Tuist"
+run = "bash scripts/run-ios-sim.sh"
+
+[tasks.build-ios-sim]
+description = "Install deps if needed, ensure Tuist caches are configured, and build the iOS Simulator app"
+run = "bash scripts/build-ios-sim.sh"
+
+[tasks.test-macos]
+description = "Install deps if needed, ensure Tuist caches are configured, and run Mac Catalyst tests via Tuist for dashboard upload"
+run = "bash scripts/test-macos.sh"
+
+[tasks.test-ios]
+description = "Install deps if needed, ensure Tuist caches are configured, and run iOS Simulator tests via Tuist for dashboard upload"
+run = "bash scripts/test-ios.sh"
+
+[tasks.warm-external-cache]
+description = "Warm Tuist external binary cache, ensure Xcode cache is configured, and refresh the generated workspace if needed"
+run = "bash scripts/warm-external-cache.sh"
+
+[tasks.share-ios-preview]
+description = "Build the iOS Simulator app and generate a Tuist share link"
+run = "bash scripts/share-ios-preview.sh"
