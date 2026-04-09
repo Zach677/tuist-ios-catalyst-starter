@@ -23,8 +23,8 @@ readonly STARTER_TUIST_PACKAGE_SWIFT_PATH="$STARTER_TUIST_DIR/Package.swift"
 readonly STARTER_TUIST_PACKAGE_RESOLVED_PATH="$STARTER_TUIST_DIR/Package.resolved"
 readonly STARTER_WORKSPACE_PATH="$STARTER_REPO_ROOT/${STARTER_PROJECT_NAME}.xcworkspace"
 readonly STARTER_PROJECT_PATH="$STARTER_REPO_ROOT/${STARTER_PROJECT_NAME}.xcodeproj"
-readonly STARTER_IOS_SIMULATOR_DEVICE="${STARTER_IOS_SIMULATOR_DEVICE:-__IOS_SIMULATOR_DEVICE__}"
-readonly STARTER_IOS_SIMULATOR_OS="${STARTER_IOS_SIMULATOR_OS:-}"
+readonly STARTER_REQUESTED_IOS_SIMULATOR_DEVICE="${STARTER_IOS_SIMULATOR_DEVICE:-__IOS_SIMULATOR_DEVICE__}"
+readonly STARTER_REQUESTED_IOS_SIMULATOR_OS="${STARTER_IOS_SIMULATOR_OS:-}"
 
 resolve_tuist_full_handle() {
   if [ -e "$STARTER_TUIST_SWIFT_PATH" ]; then
@@ -59,6 +59,121 @@ run_tuist() {
     cd "$STARTER_REPO_ROOT"
     "$STARTER_TUIST_BIN" "$@"
   )
+}
+
+resolve_ios_simulator() {
+  REQUESTED_IOS_SIMULATOR_DEVICE="$STARTER_REQUESTED_IOS_SIMULATOR_DEVICE" \
+  REQUESTED_IOS_SIMULATOR_OS="$STARTER_REQUESTED_IOS_SIMULATOR_OS" \
+  python3 - <<'PY'
+import json
+import os
+import re
+import subprocess
+
+
+def version_key(value: str) -> tuple[int, ...]:
+    parts = []
+    for item in value.split("."):
+        try:
+            parts.append(int(item))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+requested_name = os.environ["REQUESTED_IOS_SIMULATOR_DEVICE"]
+requested_os = os.environ["REQUESTED_IOS_SIMULATOR_OS"]
+raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"], text=True)
+devices = json.loads(raw).get("devices", {})
+
+candidates: list[dict[str, str]] = []
+for runtime, runtime_devices in devices.items():
+    marker = ".SimRuntime.iOS-"
+    if marker not in runtime:
+        continue
+    os_version = runtime.split(marker, 1)[1].replace("-", ".")
+    for device in runtime_devices:
+        if not device.get("isAvailable", True):
+            continue
+        candidates.append(
+            {
+                "name": device["name"],
+                "udid": device["udid"],
+                "os": os_version,
+            }
+        )
+
+if not candidates:
+    raise SystemExit("No available iOS simulators were found.")
+
+
+def choose(entries: list[dict[str, str]]) -> dict[str, str]:
+    return sorted(entries, key=lambda entry: (version_key(entry["os"]), entry["name"]))[-1]
+
+
+def choose_iphone(entries: list[dict[str, str]]) -> dict[str, str]:
+    def rank(entry: dict[str, str]) -> tuple[tuple[int, ...], int, int, str]:
+        match = re.match(r"iPhone (\d+)(?: (.*))?$", entry["name"])
+        generation = int(match.group(1)) if match else -1
+        suffix = (match.group(2) or "").strip() if match else ""
+        suffix_rank = {
+            "": 5,
+            "e": 4,
+            "Pro": 3,
+            "Pro Max": 2,
+            "Air": 1,
+        }.get(suffix, 0)
+        return (version_key(entry["os"]), generation, suffix_rank, entry["name"])
+
+    return sorted(entries, key=rank)[-1]
+
+
+exact_matches = [
+    candidate
+    for candidate in candidates
+    if candidate["name"] == requested_name and (not requested_os or candidate["os"] == requested_os)
+]
+name_matches = [candidate for candidate in candidates if candidate["name"] == requested_name]
+iPhone_matches = [candidate for candidate in candidates if candidate["name"].startswith("iPhone ")]
+
+resolved = (
+    choose(exact_matches)
+    if exact_matches
+    else choose(name_matches)
+    if name_matches
+    else choose_iphone(iPhone_matches)
+    if iPhone_matches
+    else choose(candidates)
+)
+
+for item in (resolved["name"], resolved["udid"], resolved["os"]):
+    print(item)
+PY
+}
+
+STARTER_RESOLVED_IOS_SIMULATOR="$(resolve_ios_simulator)"
+readonly STARTER_IOS_SIMULATOR_DEVICE="$(printf '%s\n' "$STARTER_RESOLVED_IOS_SIMULATOR" | sed -n '1p')"
+readonly STARTER_IOS_SIMULATOR_UDID="$(printf '%s\n' "$STARTER_RESOLVED_IOS_SIMULATOR" | sed -n '2p')"
+readonly STARTER_IOS_SIMULATOR_OS="$(printf '%s\n' "$STARTER_RESOLVED_IOS_SIMULATOR" | sed -n '3p')"
+
+if [ "$STARTER_IOS_SIMULATOR_DEVICE" != "$STARTER_REQUESTED_IOS_SIMULATOR_DEVICE" ] || \
+   { [ -n "$STARTER_REQUESTED_IOS_SIMULATOR_OS" ] && [ "$STARTER_IOS_SIMULATOR_OS" != "$STARTER_REQUESTED_IOS_SIMULATOR_OS" ]; }; then
+  echo "Requested iOS simulator '$STARTER_REQUESTED_IOS_SIMULATOR_DEVICE${STARTER_REQUESTED_IOS_SIMULATOR_OS:+ (OS $STARTER_REQUESTED_IOS_SIMULATOR_OS)}' is unavailable; using '$STARTER_IOS_SIMULATOR_DEVICE' (OS $STARTER_IOS_SIMULATOR_OS)."
+fi
+
+ios_simulator_destination() {
+  printf 'platform=iOS Simulator,id=%s' "$STARTER_IOS_SIMULATOR_UDID"
+}
+
+boot_ios_simulator() {
+  open -a Simulator >/dev/null 2>&1 || true
+  xcrun simctl boot "$STARTER_IOS_SIMULATOR_UDID" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "$STARTER_IOS_SIMULATOR_UDID" -b
+}
+
+read_app_bundle_id() {
+  local app_path="$1"
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist"
 }
 
 touch_stamp() {

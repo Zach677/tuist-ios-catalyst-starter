@@ -11,6 +11,7 @@ ensure_xcode_cache_setup
 ensure_external_cache_warmed
 ensure_generated_workspace
 
+rm -rf "$RESULT_BUNDLE_PATH"
 mkdir -p "$(dirname "$RESULT_BUNDLE_PATH")"
 
 run_tuist test "$STARTER_PROJECT_NAME" \
